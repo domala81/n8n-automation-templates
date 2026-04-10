@@ -1,0 +1,417 @@
+{
+  "name": "Linkedin Job Alert - share",
+  "nodes": [
+    {
+      "parameters": {
+        "fieldToSplitOut": "links",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [2688, 560],
+      "id": "f0117980-3b9b-4cd3-9286-c5c6dd753356",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1600, 848],
+      "id": "964acc5e-08cd-43d5-9395-dfa9de1231d5",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "o3-mini-2025-01-31",
+          "mode": "list",
+          "cachedResultName": "O3-MINI-2025-01-31"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Hi, you are a helpful job matcher, you analyze the given resume and job description and providing a job matching score in a json format \n\n\nfor example \n\nyour response should be like\n{\"job_match_score\": 80 }\n\nmake sure you give project json data, dont give any json markdown text and all\n\nmy resume:\n{{ $('Resume').item.json.resume }}\n\n\njob_description: \n\n {{ $json.jd }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [2400, 1040],
+      "id": "3144f2e8-26a7-47d0-a218-42314794d61b",
+      "name": "OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "<YOUR_OPENAI_CREDENTIAL_ID>",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "<YOUR_TELEGRAM_CHAT_ID>",
+        "text": "=Title: {{ $('Parse').item.json.title }}\nCompany: {{ $('Parse').item.json.company }}\nLocation: {{ $('Parse').item.json.location }}\nJob Score: {{ $('Edit Fields').item.json.job_match_score }}\nApply: {{ $('Parse').item.json.link }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2144, 1024],
+      "id": "d96243ba-e719-4656-97a0-dd95aed6d738",
+      "name": "Telegram",
+      "webhookId": "<YOUR_WEBHOOK_ID>",
+      "credentials": {
+        "telegramApi": {
+          "id": "<YOUR_TELEGRAM_CREDENTIAL_ID>",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.linkedin.com/jobs/search/?currentJobId=4397333222&f_TPR=r86400&geoId=103644278&keywords={{ encodeURIComponent($('Enter Job Role').item.json.job_role) }}\n&origin=JOB_SEARCH_PAGE_SEARCH_BUTTON&refresh=true",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2032, 560],
+      "id": "72b33b15-f456-4b67-98ee-1b339903ac53",
+      "name": "Scrape Last 24 hours Job"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.data;\n\nfunction extractAll(pattern, text) {\n  return [...text.matchAll(pattern)].map(m => m[1].trim().replace(/\\s+/g, ' '));\n}\n\nconst jobIds   = extractAll(/data-entity-urn=\"urn:li:jobPosting:(\\d+)\"/g, html);\n\nconst links    = [...html.matchAll(/class=\"base-card__full-link[^\"]*\"\\s+href=\"([^\"]+)\"/g)]\n                   .map(m => m[1].replace(/&amp;/g, '&'));\n\nconst titles   = [...html.matchAll(/class=\"base-card__full-link[^\"]*\"[^>]*>[\\s\\S]*?<span class=\"sr-only\">([\\s\\S]*?)<\\/span>/g)]\n                   .map(m => m[1].trim().replace(/\\s+/g, ' '));\n\nconst companies = [...html.matchAll(/data-tracking-control-name=\"public_jobs_jserp-result_job-search-card-subtitle\"[^>]*>\\s*([\\s\\S]*?)\\s*<\\/a>/g)]\n                   .map(m => m[1].trim().replace(/\\s+/g, ' '));\n\nconst locations = extractAll(/<span class=\"job-search-card__location\">\\s*([\\s\\S]*?)\\s*<\\/span>/g, html);\n\nconst dates     = extractAll(/<time[^>]*datetime=\"([^\"]*)\"[^>]*>/g, html);\n\nreturn jobIds.map((id, i) => ({\n  json: {\n    jobId:      id,\n    links:        links[i]     || null,\n    title:      titles[i]    || null,\n    company:    companies[i] || null,\n    location:   locations[i] || null,\n    postedDate: dates[i]     || null,\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2288, 560],
+      "id": "ab13801f-8091-4c9b-97a0-dc5d53751de8",
+      "name": "Extract Job Links"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.links }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2016, 864],
+      "id": "593c17cb-ec8c-4c0d-964e-45073da68d29",
+      "name": "Scrape Each Job",
+      "retryOnFail": true,
+      "executeOnce": false,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.data;\n\n// Helper: strip HTML tags and decode entities (equivalent to BS4's get_text)\nfunction getText(htmlStr) {\n  return htmlStr\n    .replace(/<[^>]+>/g, '\\n')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\n// Title: first <h1> — mirrors soup.select('div h1')[0].text\nconst titleMatch = html.match(/<h1[^>]*>([\\s\\S]*?)<\\/h1>/);\nconst title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : null;\n\n// Company: first <a> inside a <span> — mirrors soup.select('div span a')[0].text\nconst companyMatch = html.match(/<span[^>]*>[\\s\\S]*?<a[^>]*>([\\s\\S]*?)<\\/a>/);\nconst company = companyMatch ? companyMatch[1].replace(/<[^>]+>/g, '').trim() : null;\n\n// Location: span with class containing topcard__flavor--bullet\nconst locationMatch = html.match(/<span[^>]*class=\"[^\"]*topcard__flavor--bullet[^\"]*\"[^>]*>([\\s\\S]*?)<\\/span>/);\nconst location = locationMatch ? locationMatch[1].replace(/<[^>]+>/g, '').trim() : null;\n\n// Job description: div with description__text--rich\nconst jdMatch = html.match(/<div[^>]*class=\"[^\"]*description__text--rich[^\"]*\"[^>]*>([\\s\\S]*?)<\\/div>\\s*<\\/div>/);\nconst jd = jdMatch ? getText(jdMatch[1]) : 'no jd';\n\n// Job ID from semaphore URN — mirrors urns[0].split(\":\")[-1]\nconst urnMatch = html.match(/data-semaphore-content-urn=\"([^\"]+)\"/);\nconst jobId = urnMatch ? urnMatch[1].split(':').pop() : null;\n\nconst link = jobId ? `https://www.linkedin.com/jobs/view/${jobId}` : null;\n\nreturn [{ json: { title, company, location, jd, link } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2192, 864],
+      "id": "adfab541-6af5-44c9-ad1b-b6ca312b0864",
+      "name": "Parse"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "=\n {{ $json.message.content }}",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1600, 1024],
+      "id": "b8f49e62-d6eb-4f89-91bd-6183c8ab290f",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1840, 864],
+      "id": "fce55a71-1af3-4dcb-9ee9-239445a1a5bc",
+      "name": "Wait",
+      "webhookId": "<YOUR_WEBHOOK_ID>"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{}]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [1328, 560],
+      "id": "18b1d6e3-1847-4825-addc-a54c556c25ee",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1499f1ac-a7ae-4983-85c7-aa7b8445b2e2",
+              "leftValue": "={{ $json.job_match_score }}",
+              "rightValue": 50,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1824, 1024],
+      "id": "dff6f962-38c9-4d3e-a622-11fb4fbf05d9",
+      "name": "Score Filter"
+    },
+    {
+      "parameters": {
+        "maxItems": 50
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [2496, 560],
+      "id": "0b30e049-7695-4b91-a971-e3f668c3d764",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"job_role\": \"AI Engineer\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1776, 560],
+      "id": "9cf1d8cc-a73a-4faa-9880-ee52516f083f",
+      "name": "Enter Job Role"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "500890d8-f9a0-4075-8419-664c13f9428f",
+              "name": "resume",
+              "value": "<YOUR_RESUME_HERE>",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1552, 560],
+      "id": "8f368233-cf22-4076-948f-ab733e649c13",
+      "name": "Resume"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Last 24 hours Job": {
+      "main": [
+        [
+          {
+            "node": "Extract Job Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Job Links": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Each Job": {
+      "main": [
+        [
+          {
+            "node": "Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse": {
+      "main": [
+        [
+          {
+            "node": "OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Score Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Scrape Each Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Filter": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enter Job Role": {
+      "main": [
+        [
+          {
+            "node": "Scrape Last 24 hours Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume": {
+      "main": [
+        [
+          {
+            "node": "Enter Job Role",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b47ec8b3-04de-47bf-8ac1-9fd686813d20",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "<YOUR_INSTANCE_ID>"
+  },
+  "id": "hdbKDCU2Mut4Amqg",
+  "tags": []
+}
