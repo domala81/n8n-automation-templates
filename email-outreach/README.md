@@ -1,5 +1,7 @@
 # Simple Recruiter Email Outreach — Setup Guide
 
+![Workflow Screenshot](email-outreach.png)
+
 ## What this workflow does
 
 This workflow automates personalized cold email outreach to recruiters and hiring managers. Instead of copy-pasting the same email over and over, you load your leads into a Google Sheet, run the workflow, and it does the rest.
